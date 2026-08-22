@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Résonance",
+    "slug": "resonance-mvp",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.resonance.mvp",
+      "versionCode": 1
+    }
+  }
+}
