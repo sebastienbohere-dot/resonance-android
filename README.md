@@ -39,6 +39,8 @@ Ouvrir l’adresse locale affichée si le navigateur ne s’ouvre pas automatiqu
 
 Sur ordinateur, cliquer sur « Activer la voix » pendant la séance. La voix française dépend des voix installées et du navigateur. Les vibrations ne sont pas simulées. La pause fige le temps et le mouvement ; elle interrompt la phrase en cours, qui ne reprend pas au milieu d’un mot. Le guidage reprend aux prochaines phrases prévues.
 
+Les intensités avant et après doivent être choisies explicitement à chaque séance. Le bouton « Retrouver mon calme » mène à la même respiration guidée, sans passer par le choix d’un type de SOS. Les jauges d’accueil sont un aperçu de démonstration, pas une mesure de ton état.
+
 Les preuves sont conservées dans le stockage du navigateur pour l’adresse utilisée. Elles ne sont pas synchronisées avec le téléphone et peuvent être effacées avec les données du navigateur. Garder l’onglet visible pendant la séance : le fonctionnement en arrière-plan et écran éteint n’est pas validé.
 
 ## Tester sur Android

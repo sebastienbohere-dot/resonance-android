@@ -53,8 +53,8 @@ const SCRIPT = [
 function App() {
   const [screen, setScreen] = useState('home');
   const [type, setType] = useState('Envie de fumer');
-  const [before, setBefore] = useState(8);
-  const [after, setAfter] = useState(3);
+  const [before, setBefore] = useState(null);
+  const [after, setAfter] = useState(null);
   const [proofs, setProofs] = useState([]);
 
   useEffect(() => {
@@ -63,13 +63,21 @@ function App() {
     }).catch(() => {});
   }, []);
 
+  const begin = (calm = false) => {
+    setBefore(null);
+    setAfter(null);
+    if (calm) setType('Retrouver mon calme');
+    else setType('Envie de fumer');
+    setScreen(calm ? 'before' : 'type');
+  };
+
   const saveProof = async () => {
     const item = {
       id: Date.now(),
       type,
       before,
       after,
-      text: `${type} : ${before}/10 → ${after}/10. J’ai traversé ce moment sans agir automatiquement.`,
+      text: `${type} : ${before}/10 → ${after}/10. J’ai pris un temps pour observer mon ressenti.`,
       date: new Date().toLocaleDateString('fr-FR'),
     };
     const next = [item, ...proofs].slice(0, 50);
@@ -82,7 +90,7 @@ function App() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.appFrame}>
       <StatusBar style="light" />
-      {screen === 'home' && <Home proofs={proofs} onSOS={() => setScreen('type')} onProofs={() => setScreen('proofs')} />}
+      {screen === 'home' && <Home proofs={proofs} onSOS={() => begin()} onCalm={() => begin(true)} onProofs={() => setScreen('proofs')} />}
       {screen === 'type' && <TypeScreen value={type} onChange={setType} onNext={() => setScreen('before')} onBack={() => setScreen('home')} />}
       {screen === 'before' && <Rating title="Quelle est l’intensité maintenant ?" value={before} onChange={setBefore} action="M’aider maintenant" onNext={() => setScreen('session')} onBack={() => setScreen('type')} />}
       {screen === 'session' && <Session type={type} onDone={() => setScreen('after')} />}
@@ -94,7 +102,7 @@ function App() {
   );
 }
 
-function Home({ onSOS, onProofs, proofs }) {
+function Home({ onSOS, onCalm, onProofs, proofs }) {
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.brand}>RÉSONANCE</Text>
@@ -102,6 +110,7 @@ function Home({ onSOS, onProofs, proofs }) {
       <Text style={styles.sub}>Prends un instant pour écouter ton état.</Text>
 
       <View style={styles.stateCard}>
+        <Text style={styles.kicker}>APERÇU · INDICATEURS DE DÉMONSTRATION</Text>
         <StateRow label="CORPS" left="Tendu" right="Apaisé" level={0.62} color={COLORS.cyan} />
         <StateRow label="MENTAL" left="Agité" right="Clair" level={0.43} color={COLORS.blue} />
         <StateRow label="ÉLAN" left="Épuisé" right="Disponible" level={0.58} color={COLORS.orange} />
@@ -109,8 +118,8 @@ function Home({ onSOS, onProofs, proofs }) {
 
       <View style={styles.suggestion}>
         <Text style={styles.kicker}>SUGGESTION</Text>
-        <Text style={styles.cardTitle}>Ton mental semble particulièrement sollicité.</Text>
-        <Pressable style={styles.secondaryBtn}><Text style={styles.secondaryText}>Retrouver mon calme · 5 min</Text></Pressable>
+        <Text style={styles.cardTitle}>Prendre cinq minutes pour respirer et observer.</Text>
+        <Pressable accessibilityRole="button" onPress={onCalm} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Retrouver mon calme · 5 min</Text></Pressable>
       </View>
 
       <Pressable onPress={onSOS} style={styles.sosBtn}>
@@ -161,15 +170,15 @@ function Rating({ title, value, onChange, action, onNext, onBack }) {
       <Back onPress={onBack} />
       <Text style={styles.h1}>{title}</Text>
       <Text style={styles.sub}>0 = faible · 10 = très intense</Text>
-      <View style={styles.ratingCircle}><Text style={styles.ratingNum}>{value}</Text><Text style={styles.ratingTen}>/10</Text></View>
+      <View style={styles.ratingCircle}><Text style={styles.ratingNum}>{value === null ? "—" : value}</Text><Text style={styles.ratingTen}>/10</Text></View>
       <View style={styles.numberRow}>
         {Array.from({ length: 11 }).map((_, i) => (
-          <Pressable key={i} onPress={() => onChange(i)} style={[styles.number, value === i && styles.numberActive]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Intensité ${i} sur 10`} accessibilityState={{ selected: value === i }} key={i} onPress={() => onChange(i)} style={[styles.number, value === i && styles.numberActive]}>
             <Text style={[styles.numberText, value === i && { color: '#061321' }]}>{i}</Text>
           </Pressable>
         ))}
       </View>
-      <Primary label={action} onPress={onNext} />
+      <Primary label={action} onPress={onNext} disabled={value === null} />
     </View>
   );
 }
@@ -268,7 +277,7 @@ function Proof({ before, after, type, onSave, onSkip }) {
       <Text style={styles.h1}>Veux-tu garder ce moment ?</Text>
       <Text style={styles.sub}>Une preuve est un fait sur lequel tu peux revenir.</Text>
       <View style={styles.proofCard}>
-        <Text style={styles.quote}>« {type} : {before}/10 → {after}/10. Je viens de traverser ce moment sans agir automatiquement. »</Text>
+        <Text style={styles.quote}>« {type} : {before}/10 → {after}/10. J’ai pris un temps pour observer mon ressenti. »</Text>
       </View>
       <Primary label="Enregistrer comme preuve" onPress={onSave} />
       <Pressable onPress={onSkip} style={styles.linkBtn}><Text style={styles.link}>Pas maintenant</Text></Pressable>
@@ -281,7 +290,7 @@ function ProofList({ proofs, onBack }) {
     <ScrollView contentContainerStyle={styles.page}>
       <Back onPress={onBack} />
       <Text style={styles.h1}>Mes preuves</Text>
-      <Text style={styles.sub}>Tu l’as déjà fait. Plusieurs fois.</Text>
+      <Text style={styles.sub}>Les moments que tu as choisi de conserver.</Text>
       {proofs.length === 0 ? <Text style={styles.empty}>Aucune preuve enregistrée pour le moment.</Text> : proofs.map(p => (
         <View key={p.id} style={styles.proofItem}>
           <Text style={styles.kicker}>{p.date}</Text>
@@ -292,8 +301,8 @@ function ProofList({ proofs, onBack }) {
   );
 }
 
-function Primary({ label, onPress }) {
-  return <Pressable onPress={onPress} style={styles.primary}><Text style={styles.primaryText}>{label}</Text></Pressable>;
+function Primary({ label, onPress, disabled = false }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.primary, disabled && { opacity: 0.45 }]}><Text style={styles.primaryText}>{label}</Text></Pressable>;
 }
 function Back({ onPress }) {
   return <Pressable onPress={onPress} style={{ marginBottom: 18 }}><Text style={styles.link}>‹ Retour</Text></Pressable>;
