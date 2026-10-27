@@ -8,6 +8,10 @@
     "android": {
       "package": "com.resonance.mvp",
       "versionCode": 1
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "Résonance"
     }
   }
 }

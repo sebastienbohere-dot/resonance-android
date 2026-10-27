@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -6,7 +6,7 @@ import {
   View,
   Pressable,
   Animated,
-  Easing,
+  Platform,
   ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -80,6 +80,7 @@ function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <View style={styles.appFrame}>
       <StatusBar style="light" />
       {screen === 'home' && <Home proofs={proofs} onSOS={() => setScreen('type')} onProofs={() => setScreen('proofs')} />}
       {screen === 'type' && <TypeScreen value={type} onChange={setType} onNext={() => setScreen('before')} onBack={() => setScreen('home')} />}
@@ -88,6 +89,7 @@ function App() {
       {screen === 'after' && <Rating title="Et maintenant ?" value={after} onChange={setAfter} action="Continuer" onNext={() => setScreen('proof')} onBack={() => setScreen('home')} />}
       {screen === 'proof' && <Proof before={before} after={after} type={type} onSave={saveProof} onSkip={() => setScreen('home')} />}
       {screen === 'proofs' && <ProofList proofs={proofs} onBack={() => setScreen('home')} />}
+      </View>
     </SafeAreaView>
   );
 }
@@ -174,59 +176,89 @@ function Rating({ title, value, onChange, action, onNext, onBack }) {
 
 function Session({ type, onDone }) {
   const scale = useRef(new Animated.Value(0.72)).current;
-  const [phase, setPhase] = useState('Inspire');
+  const elapsed = useRef(0);
+  const spokenAt = useRef(-1);
   const [seconds, setSeconds] = useState(0);
+  const [phase, setPhase] = useState('Inspire');
   const [running, setRunning] = useState(true);
-  const [scriptIndex, setScriptIndex] = useState(0);
+  const [voice, setVoice] = useState(Platform.OS !== 'web');
+  const [voiceError, setVoiceError] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    const loop = async () => {
-      while (!cancelled) {
-        setPhase('Inspire');
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        await new Promise(resolve => Animated.timing(scale, { toValue: 1.05, duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }).start(resolve));
-        setPhase('Expire');
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-        await new Promise(resolve => Animated.timing(scale, { toValue: 0.72, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }).start(resolve));
-      }
-    };
-    loop();
-    return () => { cancelled = true; scale.stopAnimation(); Speech.stop(); };
-  }, []);
+  const speak = (text) => {
+    try {
+      Speech.speak(text, {
+        language: 'fr-FR', rate: 0.82, pitch: 0.95,
+        onError: () => setVoiceError('La voix est indisponible. Tu peux continuer avec le guide visuel.'),
+      });
+    } catch {
+      setVoiceError('La voix est indisponible. Tu peux continuer avec le guide visuel.');
+    }
+  };
 
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => setSeconds(s => s + 1), 1000);
+    let previous = performance.now();
+    const id = setInterval(() => {
+      const now = performance.now();
+      elapsed.current = Math.min(300000, elapsed.current + now - previous);
+      previous = now;
+      const cycle = elapsed.current % 10000;
+      const progress = cycle < 4000 ? cycle / 4000 : 1 - (cycle - 4000) / 6000;
+      scale.setValue(0.72 + 0.33 * (1 - Math.cos(Math.PI * progress)) / 2);
+      setPhase(cycle < 4000 ? 'Inspire' : 'Expire');
+      setSeconds(Math.floor(elapsed.current / 1000));
+    }, 50);
     return () => clearInterval(id);
-  }, [running]);
+  }, [running, scale]);
 
   useEffect(() => {
-    if (!running) return;
-    if (seconds === 3 || (seconds > 3 && seconds % 18 === 0)) {
-      const text = SCRIPT[scriptIndex % SCRIPT.length];
-      Speech.speak(text, { language: 'fr-FR', rate: 0.82, pitch: 0.95 });
-      setScriptIndex(i => i + 1);
+    if (Platform.OS !== 'web' && running) {
+      Haptics.impactAsync(phase === 'Inspire' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+  }, [phase, running]);
+
+  useEffect(() => {
+    if (running && voice && seconds >= 3) {
+      const cue = Math.floor((seconds - 3) / 18);
+      if (cue !== spokenAt.current) {
+        spokenAt.current = cue;
+        speak(SCRIPT[cue % SCRIPT.length]);
+      }
     }
     if (seconds >= 300) onDone();
-  }, [seconds, running]);
+  }, [seconds, running, voice]);
 
+  useEffect(() => () => { Speech.stop().catch(() => {}); }, []);
+
+  const togglePause = () => {
+    // Stop works on Android too; resume continues the visual cycle at its saved position.
+    if (running) Speech.stop().catch(() => {});
+    setRunning(value => !value);
+  };
+  const toggleVoice = () => {
+    Speech.stop().catch(() => {});
+    setVoiceError('');
+    if (!voice && running) speak('Suis simplement le mouvement.');
+    setVoice(value => !value);
+  };
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
   const ss = String(seconds % 60).padStart(2, '0');
 
   return (
-    <View style={[styles.page, { alignItems: 'center' }]}>
+    <ScrollView contentContainerStyle={[styles.page, { alignItems: 'center' }]}>
       <Text style={styles.kicker}>{type}</Text>
       <Text style={styles.h1}>Rien à décider maintenant.</Text>
       <Text style={styles.sub}>Suis simplement le mouvement.</Text>
       <Animated.View style={[styles.breathe, { transform: [{ scale }] }]}>
-        <Text style={styles.breatheText}>{phase}</Text>
+        <Text style={styles.breatheText}>{running ? phase : 'En pause'}</Text>
       </Animated.View>
       <Text style={styles.timer}>{mm}:{ss}</Text>
       <Text style={styles.sessionLine}>Respire. Observe. Attends. Choisis.</Text>
-      <Pressable onPress={() => { setRunning(r => !r); running ? Speech.pause() : Speech.resume(); }} style={styles.pause}><Text style={styles.pauseText}>{running ? 'Pause' : 'Reprendre'}</Text></Pressable>
-      <Pressable onPress={onDone} style={styles.linkBtn}><Text style={styles.link}>Terminer la séance</Text></Pressable>
-    </View>
+      <Pressable accessibilityRole="button" onPress={togglePause} style={styles.pause}><Text style={styles.pauseText}>{running ? 'Pause' : 'Reprendre'}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={toggleVoice} style={styles.linkBtn}><Text style={styles.link}>{voice ? 'Désactiver la voix' : 'Activer la voix'}</Text></Pressable>
+      {!!voiceError && <Text style={styles.sub}>{voiceError}</Text>}
+      <Pressable accessibilityRole="button" onPress={onDone} style={styles.linkBtn}><Text style={styles.link}>Terminer la séance</Text></Pressable>
+    </ScrollView>
   );
 }
 
@@ -269,9 +301,10 @@ function Back({ onPress }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
+  appFrame: { flex: 1, width: '100%', maxWidth: 640, alignSelf: 'center' },
   page: { flexGrow: 1, padding: 22, backgroundColor: COLORS.bg },
   brand: { color: COLORS.cyan, letterSpacing: 5, fontSize: 13, fontWeight: '700', marginBottom: 28 },
-  h1: { color: COLORS.text, fontSize: 29, lineHeight: 35, fontWeight: '650', marginBottom: 8 },
+  h1: { color: COLORS.text, fontSize: 29, lineHeight: 35, fontWeight: '600', marginBottom: 8 },
   sub: { color: COLORS.muted, fontSize: 15, lineHeight: 22 },
   stateCard: { marginTop: 26, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.line, borderRadius: 24, padding: 20 },
   label: { color: COLORS.text, fontWeight: '700', marginBottom: 9 },
@@ -284,12 +317,12 @@ const styles = StyleSheet.create({
   cardTitle: { color: COLORS.text, fontSize: 18, lineHeight: 24 },
   secondaryBtn: { marginTop: 16, backgroundColor: '#9AC7F0', padding: 14, borderRadius: 16, alignItems: 'center' },
   secondaryText: { color: '#0B2032', fontWeight: '700' },
-  sosBtn: { marginTop: 24, alignSelf: 'center', width: 205, height: 205, borderRadius: 103, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3C1E24', borderWidth: 3, borderColor: COLORS.red },
+  sosBtn: { marginTop: 24, marginBottom: 32, alignSelf: 'center', width: 205, height: 205, borderRadius: 103, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3C1E24', borderWidth: 3, borderColor: COLORS.red },
   sosText: { color: '#FFF', fontWeight: '800', fontSize: 48, letterSpacing: 2 },
   sosSub: { position: 'absolute', bottom: -40, color: COLORS.red, fontWeight: '600', width: 260, textAlign: 'center' },
   footer: { color: COLORS.muted, textAlign: 'center', marginTop: 40, fontSize: 12, letterSpacing: .5 },
   linkBtn: { padding: 18, alignItems: 'center', marginTop: 20 },
-  link: { color: COLORS.blue, fontWeight: '650' },
+  link: { color: COLORS.blue, fontWeight: '600' },
   choice: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderRadius: 18, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card },
   choiceActive: { borderColor: COLORS.cyan, backgroundColor: '#10313E' },
   choiceText: { color: COLORS.text, fontSize: 16 },
