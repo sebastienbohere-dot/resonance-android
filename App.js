@@ -192,11 +192,34 @@ function Session({ type, onDone }) {
   const [running, setRunning] = useState(true);
   const [voice, setVoice] = useState(Platform.OS !== 'web');
   const [voiceError, setVoiceError] = useState('');
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(null);
+  const [showVoices, setShowVoices] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const voices = (await Speech.getAvailableVoicesAsync()).filter(item => /^fr([-_]|$)/i.test(item.language));
+        if (!active) return;
+        setAvailableVoices(voices);
+        // Voice APIs do not expose gender; prefer familiar French voice names when present.
+        const preferred = voices.find(item => /Denise|Hortense|Julie|Virginie|Audrey|Amelie|Amélie/i.test(item.name));
+        setSelectedVoice(previous => previous || preferred?.identifier || null);
+      } catch { /* The visual session remains available without speech. */ }
+    };
+    refresh();
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.addEventListener('voiceschanged', refresh);
+      return () => { active = false; window.speechSynthesis.removeEventListener('voiceschanged', refresh); };
+    }
+    return () => { active = false; };
+  }, []);
 
   const speak = (text) => {
     try {
       Speech.speak(text, {
-        language: 'fr-FR', rate: 0.82, pitch: 0.95,
+        language: 'fr-FR', voice: selectedVoice || undefined, rate: 0.75, pitch: 1.0, volume: 0.8,
         onError: () => setVoiceError('La voix est indisponible. Tu peux continuer avec le guide visuel.'),
       });
     } catch {
@@ -228,7 +251,7 @@ function Session({ type, onDone }) {
 
   useEffect(() => {
     if (running && voice && seconds >= 3) {
-      const cue = Math.floor((seconds - 3) / 18);
+      const cue = Math.floor((seconds - 3) / 28);
       if (cue !== spokenAt.current) {
         spokenAt.current = cue;
         speak(SCRIPT[cue % SCRIPT.length]);
@@ -265,6 +288,13 @@ function Session({ type, onDone }) {
       <Text style={styles.sessionLine}>Respire. Observe. Attends. Choisis.</Text>
       <Pressable accessibilityRole="button" onPress={togglePause} style={styles.pause}><Text style={styles.pauseText}>{running ? 'Pause' : 'Reprendre'}</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={toggleVoice} style={styles.linkBtn}><Text style={styles.link}>{voice ? 'Désactiver la voix' : 'Activer la voix'}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => { Speech.stop().catch(() => {}); speak('Prends le temps de t’installer. Tu peux laisser tes épaules se relâcher. Rien ne presse.'); }} style={styles.linkBtn}><Text style={styles.link}>Écouter un extrait</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => setShowVoices(value => !value)} style={styles.linkBtn}><Text style={styles.link}>{showVoices ? 'Masquer les voix' : 'Choisir une voix française'}</Text></Pressable>
+      {showVoices && <View style={{ width: '100%' }}>
+        <Text style={styles.sub}>Les voix disponibles dépendent de ton ordinateur. Écoute un extrait pour choisir celle qui te convient.</Text>
+        {availableVoices.length === 0 && <Text style={styles.sub}>Aucune voix française détectée. La voix par défaut sera utilisée.</Text>}
+        {availableVoices.map(item => <Pressable key={item.identifier} accessibilityRole="button" accessibilityState={{ selected: selectedVoice === item.identifier }} onPress={() => { Speech.stop().catch(() => {}); setSelectedVoice(item.identifier); }} style={[styles.choice, { marginTop: 8 }, selectedVoice === item.identifier && styles.choiceActive]}><Text style={styles.choiceText}>{item.name}</Text></Pressable>)}
+      </View>}
       {!!voiceError && <Text style={styles.sub}>{voiceError}</Text>}
       <Pressable accessibilityRole="button" onPress={onDone} style={styles.linkBtn}><Text style={styles.link}>Terminer la séance</Text></Pressable>
     </ScrollView>
