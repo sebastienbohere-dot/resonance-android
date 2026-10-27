@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -6,7 +6,7 @@ import {
   View,
   Pressable,
   Animated,
-  Easing,
+  Platform,
   ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -53,8 +53,8 @@ const SCRIPT = [
 function App() {
   const [screen, setScreen] = useState('home');
   const [type, setType] = useState('Envie de fumer');
-  const [before, setBefore] = useState(8);
-  const [after, setAfter] = useState(3);
+  const [before, setBefore] = useState(null);
+  const [after, setAfter] = useState(null);
   const [proofs, setProofs] = useState([]);
 
   useEffect(() => {
@@ -63,13 +63,21 @@ function App() {
     }).catch(() => {});
   }, []);
 
+  const begin = (calm = false) => {
+    setBefore(null);
+    setAfter(null);
+    if (calm) setType('Retrouver mon calme');
+    else setType('Envie de fumer');
+    setScreen(calm ? 'before' : 'type');
+  };
+
   const saveProof = async () => {
     const item = {
       id: Date.now(),
       type,
       before,
       after,
-      text: `${type} : ${before}/10 → ${after}/10. J’ai traversé ce moment sans agir automatiquement.`,
+      text: `${type} : ${before}/10 → ${after}/10. J’ai pris un temps pour observer mon ressenti.`,
       date: new Date().toLocaleDateString('fr-FR'),
     };
     const next = [item, ...proofs].slice(0, 50);
@@ -80,19 +88,21 @@ function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <View style={styles.appFrame}>
       <StatusBar style="light" />
-      {screen === 'home' && <Home proofs={proofs} onSOS={() => setScreen('type')} onProofs={() => setScreen('proofs')} />}
+      {screen === 'home' && <Home proofs={proofs} onSOS={() => begin()} onCalm={() => begin(true)} onProofs={() => setScreen('proofs')} />}
       {screen === 'type' && <TypeScreen value={type} onChange={setType} onNext={() => setScreen('before')} onBack={() => setScreen('home')} />}
       {screen === 'before' && <Rating title="Quelle est l’intensité maintenant ?" value={before} onChange={setBefore} action="M’aider maintenant" onNext={() => setScreen('session')} onBack={() => setScreen('type')} />}
       {screen === 'session' && <Session type={type} onDone={() => setScreen('after')} />}
       {screen === 'after' && <Rating title="Et maintenant ?" value={after} onChange={setAfter} action="Continuer" onNext={() => setScreen('proof')} onBack={() => setScreen('home')} />}
       {screen === 'proof' && <Proof before={before} after={after} type={type} onSave={saveProof} onSkip={() => setScreen('home')} />}
       {screen === 'proofs' && <ProofList proofs={proofs} onBack={() => setScreen('home')} />}
+      </View>
     </SafeAreaView>
   );
 }
 
-function Home({ onSOS, onProofs, proofs }) {
+function Home({ onSOS, onCalm, onProofs, proofs }) {
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.brand}>RÉSONANCE</Text>
@@ -100,6 +110,7 @@ function Home({ onSOS, onProofs, proofs }) {
       <Text style={styles.sub}>Prends un instant pour écouter ton état.</Text>
 
       <View style={styles.stateCard}>
+        <Text style={styles.kicker}>APERÇU · INDICATEURS DE DÉMONSTRATION</Text>
         <StateRow label="CORPS" left="Tendu" right="Apaisé" level={0.62} color={COLORS.cyan} />
         <StateRow label="MENTAL" left="Agité" right="Clair" level={0.43} color={COLORS.blue} />
         <StateRow label="ÉLAN" left="Épuisé" right="Disponible" level={0.58} color={COLORS.orange} />
@@ -107,8 +118,8 @@ function Home({ onSOS, onProofs, proofs }) {
 
       <View style={styles.suggestion}>
         <Text style={styles.kicker}>SUGGESTION</Text>
-        <Text style={styles.cardTitle}>Ton mental semble particulièrement sollicité.</Text>
-        <Pressable style={styles.secondaryBtn}><Text style={styles.secondaryText}>Retrouver mon calme · 5 min</Text></Pressable>
+        <Text style={styles.cardTitle}>Prendre cinq minutes pour respirer et observer.</Text>
+        <Pressable accessibilityRole="button" onPress={onCalm} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Retrouver mon calme · 5 min</Text></Pressable>
       </View>
 
       <Pressable onPress={onSOS} style={styles.sosBtn}>
@@ -159,74 +170,134 @@ function Rating({ title, value, onChange, action, onNext, onBack }) {
       <Back onPress={onBack} />
       <Text style={styles.h1}>{title}</Text>
       <Text style={styles.sub}>0 = faible · 10 = très intense</Text>
-      <View style={styles.ratingCircle}><Text style={styles.ratingNum}>{value}</Text><Text style={styles.ratingTen}>/10</Text></View>
+      <View style={styles.ratingCircle}><Text style={styles.ratingNum}>{value === null ? "—" : value}</Text><Text style={styles.ratingTen}>/10</Text></View>
       <View style={styles.numberRow}>
         {Array.from({ length: 11 }).map((_, i) => (
-          <Pressable key={i} onPress={() => onChange(i)} style={[styles.number, value === i && styles.numberActive]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Intensité ${i} sur 10`} accessibilityState={{ selected: value === i }} key={i} onPress={() => onChange(i)} style={[styles.number, value === i && styles.numberActive]}>
             <Text style={[styles.numberText, value === i && { color: '#061321' }]}>{i}</Text>
           </Pressable>
         ))}
       </View>
-      <Primary label={action} onPress={onNext} />
+      <Primary label={action} onPress={onNext} disabled={value === null} />
     </View>
   );
 }
 
 function Session({ type, onDone }) {
   const scale = useRef(new Animated.Value(0.72)).current;
-  const [phase, setPhase] = useState('Inspire');
+  const elapsed = useRef(0);
+  const spokenAt = useRef(-1);
   const [seconds, setSeconds] = useState(0);
+  const [phase, setPhase] = useState('Inspire');
   const [running, setRunning] = useState(true);
-  const [scriptIndex, setScriptIndex] = useState(0);
+  const [voice, setVoice] = useState(Platform.OS !== 'web');
+  const [voiceError, setVoiceError] = useState('');
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(null);
+  const [showVoices, setShowVoices] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    const loop = async () => {
-      while (!cancelled) {
-        setPhase('Inspire');
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        await new Promise(resolve => Animated.timing(scale, { toValue: 1.05, duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }).start(resolve));
-        setPhase('Expire');
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-        await new Promise(resolve => Animated.timing(scale, { toValue: 0.72, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }).start(resolve));
-      }
+    let active = true;
+    const refresh = async () => {
+      try {
+        const voices = (await Speech.getAvailableVoicesAsync()).filter(item => /^fr([-_]|$)/i.test(item.language));
+        if (!active) return;
+        setAvailableVoices(voices);
+        // Voice APIs do not expose gender; prefer familiar French voice names when present.
+        const preferred = voices.find(item => /Denise|Hortense|Julie|Virginie|Audrey|Amelie|Amélie/i.test(item.name));
+        setSelectedVoice(previous => previous || preferred?.identifier || null);
+      } catch { /* The visual session remains available without speech. */ }
     };
-    loop();
-    return () => { cancelled = true; scale.stopAnimation(); Speech.stop(); };
+    refresh();
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.addEventListener('voiceschanged', refresh);
+      return () => { active = false; window.speechSynthesis.removeEventListener('voiceschanged', refresh); };
+    }
+    return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setSeconds(s => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
+  const speak = (text) => {
+    try {
+      Speech.speak(text, {
+        language: 'fr-FR', voice: selectedVoice || undefined, rate: 0.75, pitch: 1.0, volume: 0.8,
+        onError: () => setVoiceError('La voix est indisponible. Tu peux continuer avec le guide visuel.'),
+      });
+    } catch {
+      setVoiceError('La voix est indisponible. Tu peux continuer avec le guide visuel.');
+    }
+  };
 
   useEffect(() => {
     if (!running) return;
-    if (seconds === 3 || (seconds > 3 && seconds % 18 === 0)) {
-      const text = SCRIPT[scriptIndex % SCRIPT.length];
-      Speech.speak(text, { language: 'fr-FR', rate: 0.82, pitch: 0.95 });
-      setScriptIndex(i => i + 1);
+    let previous = performance.now();
+    const id = setInterval(() => {
+      const now = performance.now();
+      elapsed.current = Math.min(300000, elapsed.current + now - previous);
+      previous = now;
+      const cycle = elapsed.current % 10000;
+      const progress = cycle < 4000 ? cycle / 4000 : 1 - (cycle - 4000) / 6000;
+      scale.setValue(0.72 + 0.33 * (1 - Math.cos(Math.PI * progress)) / 2);
+      setPhase(cycle < 4000 ? 'Inspire' : 'Expire');
+      setSeconds(Math.floor(elapsed.current / 1000));
+    }, 50);
+    return () => clearInterval(id);
+  }, [running, scale]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' && running) {
+      Haptics.impactAsync(phase === 'Inspire' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+  }, [phase, running]);
+
+  useEffect(() => {
+    if (running && voice && seconds >= 3) {
+      const cue = Math.floor((seconds - 3) / 28);
+      if (cue !== spokenAt.current) {
+        spokenAt.current = cue;
+        speak(SCRIPT[cue % SCRIPT.length]);
+      }
     }
     if (seconds >= 300) onDone();
-  }, [seconds, running]);
+  }, [seconds, running, voice]);
 
+  useEffect(() => () => { Speech.stop().catch(() => {}); }, []);
+
+  const togglePause = () => {
+    // Stop works on Android too; resume continues the visual cycle at its saved position.
+    if (running) Speech.stop().catch(() => {});
+    setRunning(value => !value);
+  };
+  const toggleVoice = () => {
+    Speech.stop().catch(() => {});
+    setVoiceError('');
+    if (!voice && running) speak('Suis simplement le mouvement.');
+    setVoice(value => !value);
+  };
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
   const ss = String(seconds % 60).padStart(2, '0');
 
   return (
-    <View style={[styles.page, { alignItems: 'center' }]}>
+    <ScrollView contentContainerStyle={[styles.page, { alignItems: 'center' }]}>
       <Text style={styles.kicker}>{type}</Text>
       <Text style={styles.h1}>Rien à décider maintenant.</Text>
       <Text style={styles.sub}>Suis simplement le mouvement.</Text>
       <Animated.View style={[styles.breathe, { transform: [{ scale }] }]}>
-        <Text style={styles.breatheText}>{phase}</Text>
+        <Text style={styles.breatheText}>{running ? phase : 'En pause'}</Text>
       </Animated.View>
       <Text style={styles.timer}>{mm}:{ss}</Text>
       <Text style={styles.sessionLine}>Respire. Observe. Attends. Choisis.</Text>
-      <Pressable onPress={() => { setRunning(r => !r); running ? Speech.pause() : Speech.resume(); }} style={styles.pause}><Text style={styles.pauseText}>{running ? 'Pause' : 'Reprendre'}</Text></Pressable>
-      <Pressable onPress={onDone} style={styles.linkBtn}><Text style={styles.link}>Terminer la séance</Text></Pressable>
-    </View>
+      <Pressable accessibilityRole="button" onPress={togglePause} style={styles.pause}><Text style={styles.pauseText}>{running ? 'Pause' : 'Reprendre'}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={toggleVoice} style={styles.linkBtn}><Text style={styles.link}>{voice ? 'Désactiver la voix' : 'Activer la voix'}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => { Speech.stop().catch(() => {}); speak('Prends le temps de t’installer. Tu peux laisser tes épaules se relâcher. Rien ne presse.'); }} style={styles.linkBtn}><Text style={styles.link}>Écouter un extrait</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => setShowVoices(value => !value)} style={styles.linkBtn}><Text style={styles.link}>{showVoices ? 'Masquer les voix' : 'Choisir une voix française'}</Text></Pressable>
+      {showVoices && <View style={{ width: '100%' }}>
+        <Text style={styles.sub}>Les voix disponibles dépendent de ton ordinateur. Écoute un extrait pour choisir celle qui te convient.</Text>
+        {availableVoices.length === 0 && <Text style={styles.sub}>Aucune voix française détectée. La voix par défaut sera utilisée.</Text>}
+        {availableVoices.map(item => <Pressable key={item.identifier} accessibilityRole="button" accessibilityState={{ selected: selectedVoice === item.identifier }} onPress={() => { Speech.stop().catch(() => {}); setSelectedVoice(item.identifier); }} style={[styles.choice, { marginTop: 8 }, selectedVoice === item.identifier && styles.choiceActive]}><Text style={styles.choiceText}>{item.name}</Text></Pressable>)}
+      </View>}
+      {!!voiceError && <Text style={styles.sub}>{voiceError}</Text>}
+      <Pressable accessibilityRole="button" onPress={onDone} style={styles.linkBtn}><Text style={styles.link}>Terminer la séance</Text></Pressable>
+    </ScrollView>
   );
 }
 
@@ -236,7 +307,7 @@ function Proof({ before, after, type, onSave, onSkip }) {
       <Text style={styles.h1}>Veux-tu garder ce moment ?</Text>
       <Text style={styles.sub}>Une preuve est un fait sur lequel tu peux revenir.</Text>
       <View style={styles.proofCard}>
-        <Text style={styles.quote}>« {type} : {before}/10 → {after}/10. Je viens de traverser ce moment sans agir automatiquement. »</Text>
+        <Text style={styles.quote}>« {type} : {before}/10 → {after}/10. J’ai pris un temps pour observer mon ressenti. »</Text>
       </View>
       <Primary label="Enregistrer comme preuve" onPress={onSave} />
       <Pressable onPress={onSkip} style={styles.linkBtn}><Text style={styles.link}>Pas maintenant</Text></Pressable>
@@ -249,7 +320,7 @@ function ProofList({ proofs, onBack }) {
     <ScrollView contentContainerStyle={styles.page}>
       <Back onPress={onBack} />
       <Text style={styles.h1}>Mes preuves</Text>
-      <Text style={styles.sub}>Tu l’as déjà fait. Plusieurs fois.</Text>
+      <Text style={styles.sub}>Les moments que tu as choisi de conserver.</Text>
       {proofs.length === 0 ? <Text style={styles.empty}>Aucune preuve enregistrée pour le moment.</Text> : proofs.map(p => (
         <View key={p.id} style={styles.proofItem}>
           <Text style={styles.kicker}>{p.date}</Text>
@@ -260,8 +331,8 @@ function ProofList({ proofs, onBack }) {
   );
 }
 
-function Primary({ label, onPress }) {
-  return <Pressable onPress={onPress} style={styles.primary}><Text style={styles.primaryText}>{label}</Text></Pressable>;
+function Primary({ label, onPress, disabled = false }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.primary, disabled && { opacity: 0.45 }]}><Text style={styles.primaryText}>{label}</Text></Pressable>;
 }
 function Back({ onPress }) {
   return <Pressable onPress={onPress} style={{ marginBottom: 18 }}><Text style={styles.link}>‹ Retour</Text></Pressable>;
@@ -269,9 +340,10 @@ function Back({ onPress }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
+  appFrame: { flex: 1, width: '100%', maxWidth: 640, alignSelf: 'center' },
   page: { flexGrow: 1, padding: 22, backgroundColor: COLORS.bg },
   brand: { color: COLORS.cyan, letterSpacing: 5, fontSize: 13, fontWeight: '700', marginBottom: 28 },
-  h1: { color: COLORS.text, fontSize: 29, lineHeight: 35, fontWeight: '650', marginBottom: 8 },
+  h1: { color: COLORS.text, fontSize: 29, lineHeight: 35, fontWeight: '600', marginBottom: 8 },
   sub: { color: COLORS.muted, fontSize: 15, lineHeight: 22 },
   stateCard: { marginTop: 26, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.line, borderRadius: 24, padding: 20 },
   label: { color: COLORS.text, fontWeight: '700', marginBottom: 9 },
@@ -284,12 +356,12 @@ const styles = StyleSheet.create({
   cardTitle: { color: COLORS.text, fontSize: 18, lineHeight: 24 },
   secondaryBtn: { marginTop: 16, backgroundColor: '#9AC7F0', padding: 14, borderRadius: 16, alignItems: 'center' },
   secondaryText: { color: '#0B2032', fontWeight: '700' },
-  sosBtn: { marginTop: 24, alignSelf: 'center', width: 205, height: 205, borderRadius: 103, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3C1E24', borderWidth: 3, borderColor: COLORS.red },
+  sosBtn: { marginTop: 24, marginBottom: 32, alignSelf: 'center', width: 205, height: 205, borderRadius: 103, alignItems: 'center', justifyContent: 'center', backgroundColor: '#3C1E24', borderWidth: 3, borderColor: COLORS.red },
   sosText: { color: '#FFF', fontWeight: '800', fontSize: 48, letterSpacing: 2 },
   sosSub: { position: 'absolute', bottom: -40, color: COLORS.red, fontWeight: '600', width: 260, textAlign: 'center' },
   footer: { color: COLORS.muted, textAlign: 'center', marginTop: 40, fontSize: 12, letterSpacing: .5 },
   linkBtn: { padding: 18, alignItems: 'center', marginTop: 20 },
-  link: { color: COLORS.blue, fontWeight: '650' },
+  link: { color: COLORS.blue, fontWeight: '600' },
   choice: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderRadius: 18, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card },
   choiceActive: { borderColor: COLORS.cyan, backgroundColor: '#10313E' },
   choiceText: { color: COLORS.text, fontSize: 16 },
